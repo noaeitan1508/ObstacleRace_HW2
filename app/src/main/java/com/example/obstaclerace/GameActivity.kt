@@ -1,6 +1,8 @@
 package com.example.obstaclerace
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -17,8 +19,12 @@ import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,6 +60,23 @@ class GameActivity : AppCompatActivity(), SensorEventListener {
     private var accelerometer: Sensor? = null
     private var lastSensorMoveTime: Long = 0
 
+    // לקוח המיקום של גוגל
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+
+    // מנגנון בקשת ההרשאות החדש של אנדרואיד
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+            if (isGranted) {
+                // המשתמש אישר! ננסה שוב לקחת מיקום
+                fetchLocationAndSaveScore()
+            } else {
+                // המשתמש סירב, נשמור את השיא עם קואורדינטות אפס או ברירת מחדל
+                Toast.makeText(this, "ללא הרשאת מיקום, השיא נשמר ללא GPS", Toast.LENGTH_SHORT).show()
+                ScoreManager.saveScore(this, distance, 32.11, 34.80) // ברירת מחדל לאזור המרכז
+                finishGameActivity()
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_game)
@@ -61,6 +84,9 @@ class GameActivity : AppCompatActivity(), SensorEventListener {
         isSensorMode = intent.getBooleanExtra("SENSOR_MODE", false)
         isFastMode = intent.getBooleanExtra("FAST_MODE", false)
         currentDelay = if (isFastMode) 300L else 600L
+
+        // אתחול שירות המיקומים
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
         initViews()
         setupGrid()
@@ -210,7 +236,7 @@ class GameActivity : AppCompatActivity(), SensorEventListener {
             MediaPlayer.create(this, R.raw.crash)?.start()
             triggerVibration()
             updateHeartsUI()
-            Toast.makeText(this, "Crash! 💥", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Crash! \uD83D\uDCA5", Toast.LENGTH_SHORT).show()
 
             if (lives <= 0) {
                 endGame()
@@ -250,11 +276,30 @@ class GameActivity : AppCompatActivity(), SensorEventListener {
         isGameActive = false
         gameJob?.cancel()
 
-        val randomLat = 31.0 + Random.nextDouble() * 2.0
-        val randomLng = 34.0 + Random.nextDouble() * 1.5
+        // במקום לסיים מיד, אנחנו מבקשים את המיקום
+        fetchLocationAndSaveScore()
+    }
 
-        ScoreManager.saveScore(this, distance, randomLat, randomLng)
+    private fun fetchLocationAndSaveScore() {
+        // בדיקה האם יש לנו כבר הרשאת מיקום
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            // יש הרשאה! מביאים את המיקום העדכני
+            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                if (location != null) {
+                    ScoreManager.saveScore(this, distance, location.latitude, location.longitude)
+                } else {
+                    // במקרה נדיר שה-GPS כבוי לגמרי במכשיר
+                    ScoreManager.saveScore(this, distance, 32.11, 34.80)
+                }
+                finishGameActivity()
+            }
+        } else {
+            // אין הרשאה - קופץ חלון בקשה למשתמש
+            requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
 
+    private fun finishGameActivity() {
         Toast.makeText(this, "Game Over! Total Distance: ${distance}m", Toast.LENGTH_LONG).show()
         finish()
     }

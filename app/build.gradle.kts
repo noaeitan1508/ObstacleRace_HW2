@@ -48,4 +48,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.gson)
+    implementation("com.google.android.gms:play-services-location:21.2.0")
 }
